@@ -1,0 +1,218 @@
+/* PiClock — kiosk layout. Designed for 1920x1080 but scales. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000 var(--bg-image) center/cover no-repeat;
+  color: var(--text-color, #bef);
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.layout {
+  display: grid;
+  /* Matches the original PyQt4 layout: narrow side columns, big clock middle.
+     Right column is a bit wider than the original to accommodate the richer
+     forecast content we render now. */
+  grid-template-columns: 22fr 50fr 28fr;
+  grid-template-rows: 1fr;
+  width: 100vw;
+  height: 100vh;
+  padding: 1vh 1vw;
+  gap: 1vw;
+}
+
+.left-col, .right-col, .center-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+  min-height: 0;
+}
+
+.center-col {
+  align-items: center;
+  justify-content: center;
+}
+
+.loading {
+  opacity: 0.6;
+  padding: 2vh;
+  text-align: center;
+}
+
+/* -------- Weather panel -------- */
+#weather {
+  padding: 1.5vh 1.5vw;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.weather-now {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-gap: 1vw;
+  align-items: center;
+}
+
+.weather-now img.icon {
+  width: 7vw;
+  height: 7vw;
+}
+
+.weather-temp {
+  font-size: 5vw;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.weather-desc {
+  font-size: 1.8vw;
+  opacity: 0.9;
+}
+
+.weather-meta {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5vh 1vw;
+  margin-top: 1vh;
+  font-size: 1.1vw;
+}
+
+.weather-meta span.label { opacity: 0.7; }
+
+/* -------- Radar maps -------- */
+.radar-map {
+  flex: 1 1 auto;
+  min-height: 15vh;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #111;
+}
+
+/* Leaflet dark-ish tweaks */
+.leaflet-container { background: #111 !important; }
+.leaflet-control-attribution { font-size: 9px !important; opacity: 0.4; }
+
+/* -------- Clock -------- */
+#analog-clock {
+  position: relative;
+  width: min(48vw, 85vh);
+  height: min(48vw, 85vh);
+  aspect-ratio: 1;
+}
+#analog-clock #clockface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+#analog-clock #hourhand,
+#analog-clock #minhand,
+#analog-clock #sechand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 100%;
+  width: auto;
+  transform-origin: 50% 50%;
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+#digital-clock {
+  font-family: "Courier New", monospace;
+  font-size: 10vw;
+  font-weight: 300;
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+#date-strip {
+  margin-top: 2vh;
+  font-size: 2vw;
+  opacity: 0.85;
+  text-align: center;
+}
+
+/* -------- Forecast panel -------- */
+#forecast {
+  padding: 1.5vh 1.5vw;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4vh;
+  height: 100%;
+}
+
+.forecast-section-title {
+  font-size: 1vw;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  margin-top: 0.6vh;
+  margin-bottom: 0.2vh;
+}
+
+.forecast-row {
+  display: grid;
+  grid-template-columns: 3.2em 2.6vw 1fr auto;
+  grid-gap: 0.7vw;
+  align-items: center;
+  padding: 0.7vh 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.forecast-row img {
+  width: 2.6vw;
+  height: 2.6vw;
+}
+
+.forecast-label {
+  font-size: 1.15vw;
+  white-space: nowrap;
+}
+
+.forecast-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2vh;
+  min-width: 0;
+}
+
+.forecast-desc-text {
+  font-size: 1.05vw;
+  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-meta {
+  font-size: 0.78vw;
+  opacity: 0.65;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-temp {
+  font-size: 1.3vw;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2vh;
+  white-space: nowrap;
+}
+
+.forecast-sub {
+  font-size: 0.78vw;
+  opacity: 0.55;
+}
