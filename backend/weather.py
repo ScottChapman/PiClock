@@ -237,7 +237,10 @@ async def fetch(settings: Settings, client: httpx.AsyncClient | None = None) -> 
     if alerts:
         updates["alerts"] = alerts
     if updates:
-        weather = weather.model_copy(update=updates)
+        # pydantic v2 uses model_copy, v1 uses copy. Runtime dispatch so the
+        # code works on Raspbian Buster (pinned v1) and modern stacks (v2).
+        copier = getattr(weather, "model_copy", None) or weather.copy
+        weather = copier(update=updates)
     return weather
 
 

@@ -60,7 +60,7 @@
 
   <script>
     // Config for JS modules. Read by clock.js, radar.js, app.js.
-    window.PICLOCK_CONFIG = {{ cfg.model_dump_json() | safe }};
+    window.PICLOCK_CONFIG = {{ json_of(cfg) | safe }};
     window.PICLOCK_UNITS  = {{ units | tojson | safe }};
   </script>
   <script src="/static/js/clock.js" defer></script>

@@ -162,8 +162,15 @@ def _time_of(iso: str) -> str:
         return iso
 
 
+def _json_of(model) -> str:
+    """JSON-encode a Pydantic model; works on v2 (model_dump_json) and v1 (json)."""
+    dumper = getattr(model, "model_dump_json", None) or model.json
+    return dumper()
+
+
 templates.env.globals["wind_cardinal"] = _wind_cardinal
 templates.env.globals["time_of"] = _time_of
+templates.env.globals["json_of"] = _json_of
 
 
 def _state(request: Request) -> AppState:

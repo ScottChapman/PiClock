@@ -130,18 +130,36 @@ def load(path: Path | None = None) -> Settings:
 
     location_raw = get("location", (0.0, 0.0))
 
-    # Pull googleapi from ApiKeys.py at repo root if present.
+    # Pull googleapi from ApiKeys.py. Search order (first hit wins):
+    #   1. $PICLOCK_APIKEYS   — explicit override
+    #   2. ~/.config/piclock/ApiKeys.py  — XDG-ish user config
+    #   3. ~/ApiKeys.py       — simple home-dir drop-in
+    #   4. <repo>/ApiKeys.py  — legacy location (kept for existing setups)
+    # Keeping credentials outside the repo means they don't get git-tracked.
     google_api_key = ""
-    apikeys_path = target.parent / "ApiKeys.py"
-    if apikeys_path.is_file():
+    candidates: list[Path] = []
+    env_override = os.environ.get("PICLOCK_APIKEYS")
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+    home = Path.home()
+    candidates += [
+        home / ".config" / "piclock" / "ApiKeys.py",
+        home / "ApiKeys.py",
+        target.parent / "ApiKeys.py",
+    ]
+    for apikeys_path in candidates:
+        if not apikeys_path.is_file():
+            continue
         apikeys_spec = importlib.util.spec_from_file_location("user_apikeys", apikeys_path)
-        if apikeys_spec is not None and apikeys_spec.loader is not None:
-            apikeys_mod = importlib.util.module_from_spec(apikeys_spec)
-            try:
-                apikeys_spec.loader.exec_module(apikeys_mod)
-                google_api_key = str(getattr(apikeys_mod, "googleapi", "") or "")
-            except Exception:
-                pass
+        if apikeys_spec is None or apikeys_spec.loader is None:
+            continue
+        apikeys_mod = importlib.util.module_from_spec(apikeys_spec)
+        try:
+            apikeys_spec.loader.exec_module(apikeys_mod)
+            google_api_key = str(getattr(apikeys_mod, "googleapi", "") or "")
+            break
+        except Exception:
+            continue
 
     return Settings(
         location=(float(location_raw[0]), float(location_raw[1])),
