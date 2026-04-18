@@ -101,6 +101,6 @@ async def test_fetch_normalizes_response():
     assert result.current.temperature == 68.0
     assert result.current.icon == "partly-cloudy-day"
     assert result.current.description == "Partly Cloudy"
-    assert len(result.forecast.hourly) == 3
+    assert len(result.forecast.hourly) == 5
     assert len(result.forecast.daily) == 2
     assert result.forecast.daily[0].weekday  # non-empty
