@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PiClock</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/css/clock.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""/>
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
+  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --bg-image: url("{{ cfg.background_url }}");
+      --text-color: {{ cfg.textcolor }};
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+
+    <section class="left-col">
+      <div id="weather"
+           hx-get="/weather-fragment"
+           hx-trigger="load, every {{ cfg.weather_refresh_minutes * 60 }}s, sse:weather"
+           hx-swap="innerHTML">
+        <p class="loading">Loading weather…</p>
+      </div>
+      <div id="radar1" class="radar-map" data-idx="0"></div>
+      <div id="radar2" class="radar-map" data-idx="1"></div>
+    </section>
+
+    <section class="center-col">
+      {% if cfg.digital %}
+        <div id="digital-clock" data-format="{{ cfg.digitalformat }}" data-utc="{{ 'true' if cfg.clockUTC else 'false' }}"></div>
+      {% else %}
+        <div id="analog-clock" data-utc="{{ 'true' if cfg.clockUTC else 'false' }}" data-theme="{{ cfg.icons }}">
+          <img id="clockface" src="" alt="">
+          <img id="hourhand" src="" alt="">
+          <img id="minhand" src="" alt="">
+          <img id="sechand" src="" alt="">
+        </div>
+      {% endif %}
+      <div id="date-strip"></div>
+    </section>
+
+    <section class="right-col">
+      <div id="forecast"
+           hx-get="/forecast-fragment"
+           hx-trigger="load, every {{ cfg.weather_refresh_minutes * 60 }}s, sse:weather"
+           hx-swap="innerHTML">
+        <p class="loading">Loading forecast…</p>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // Config for JS modules. Read by clock.js, radar.js, app.js.
+    window.PICLOCK_CONFIG = {{ cfg.model_dump_json() | safe }};
+    window.PICLOCK_UNITS  = {{ units | tojson | safe }};
+  </script>
+  <script src="/static/js/clock.js" defer></script>
+  <script src="/static/js/radar.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</body>
+</html>
