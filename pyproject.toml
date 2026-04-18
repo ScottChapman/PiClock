@@ -1,7 +1,7 @@
 [project]
 name = "piclock"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "astral>=3.2",
     "fastapi>=0.136.0",
