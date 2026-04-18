@@ -1647,7 +1647,7 @@ class Radar(QtGui.QLabel):
         self.corners = getCorners(self.point, self.zoom,
                                   rect.width(), rect.height())
         self.radarFrames = {}
-        self.radarHost = "tilecache.rainviewer.com"
+        self.radarHost = "https://tilecache.rainviewer.com"
         self.cornerTiles = {
          "NW": getTileXY(LatLng(self.corners["N"],
                                 self.corners["W"]), self.zoom),
@@ -1774,7 +1774,7 @@ class Radar(QtGui.QLabel):
             self.tileQimages = []
             path = self.radarFrames.get(t, "")
             for tt in self.tiletails:
-                tileurl = "https://" + self.radarHost + path + tt
+                tileurl = self.radarHost + path + tt
                 self.tileurls.append(tileurl)
         print self.myname + " " + str(self.getIndex) + " " + self.tileurls[i]
         self.tilereq = QNetworkRequest(QUrl(self.tileurls[i]))
