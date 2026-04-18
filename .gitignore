@@ -62,3 +62,4 @@ docs/_build/
 target/
 
 Thumbs.db
+ApiKeys.py

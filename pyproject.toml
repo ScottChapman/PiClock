@@ -23,3 +23,11 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
+
+# piwheels hosts prebuilt armv7l wheels for Pi users (Pillow, pygame-ce, etc.).
+# macOS/Linux-x86 users still get PyPI wheels — piwheels is only consulted as
+# a fallback, and PyPI is preferred when both provide a compatible wheel.
+[[tool.uv.index]]
+name = "piwheels"
+url = "https://www.piwheels.org/simple/"
+default = false
