@@ -130,6 +130,12 @@ def load_assets(layout: Layout, config: dict | None) -> Assets:
     clock_side = layout.clock.width
     face = _safe_load(IMAGES_DIR / "clockface3.png")
     if face is not None:
+        # The PNG has "QUARTZ" baked in cyan at ~24% below centre. Zero out
+        # the alpha in that band so the background shows through instead.
+        fw, fh = face.get_size()
+        hide = pygame.Rect(0, 0, int(fw * 0.26), int(fh * 0.06))
+        hide.center = (fw // 2, fh // 2 + int(fh * 0.245))
+        face.fill((0, 0, 0, 0), hide)
         face = pygame.transform.smoothscale(face, (clock_side, clock_side))
     # Hand PNGs are tall+narrow strips — scale so height matches clockface.
     def _scale_hand(name: str) -> pygame.Surface | None:
@@ -291,17 +297,14 @@ def draw_weather(
     # Meta rows under the icon/temp
     meta_y = y + max(icon_size, temp_surf.get_height() + fonts.medium.get_height()) + pad
     line_h = fonts.small.get_height() + 2
-    lines: list[str] = []
-    lines.append(f"Feels {round(cur.get('apparent_temperature', 0))}{units['temp']}  "
-                 f"Humidity {cur.get('humidity', 0)}%")
-    wind_dir = wind_cardinal(cur.get("wind_direction", 0))
-    ws = round(cur.get("wind_speed", 0))
-    gust = cur.get("wind_gust")
-    wind = f"Wind {wind_dir} {ws}{units['speed']}"
-    if gust and gust > cur.get("wind_speed", 0) + 3:
-        wind += f" g{round(gust)}"
-    lines.append(wind)
-    lines.append(f"Pressure {round(cur.get('pressure', 0))} hPa")
+
+    # "Next rain" headline: first upcoming hour with rain likely
+    hourly = (weather.get("forecast") or {}).get("hourly") or []
+    next_rain = _next_rain_headline(hourly, units)
+    if next_rain:
+        surf = fonts.small_bold.render(next_rain, True, (240, 200, 100))
+        screen.blit(surf, (x, meta_y))
+        meta_y += surf.get_height() + 3
 
     def _hhmm(iso: str) -> str:
         try:
@@ -309,18 +312,99 @@ def draw_weather(
         except ValueError:
             return iso
 
-    lines.append(f"Sunrise {_hhmm(cur.get('sunrise', ''))}")
-    lines.append(f"Sunset  {_hhmm(cur.get('sunset', ''))}")
-    lines.append(f"Moon: {cur.get('moon_phase', '')}")
-    metar = weather.get("metar")
-    if metar:
-        lines.append(metar[:48])
+    lines: list[str] = []
+    lines.append(
+        f"Feels {round(cur.get('apparent_temperature', 0))}{units['temp']}  "
+        f"Humidity {cur.get('humidity', 0)}%"
+    )
+    wind_dir = wind_cardinal(cur.get("wind_direction", 0))
+    ws = round(cur.get("wind_speed", 0))
+    gust = cur.get("wind_gust")
+    wind = f"Wind {wind_dir} {ws}{units['speed']}"
+    if gust and gust > cur.get("wind_speed", 0) + 3:
+        wind += f" g{round(gust)}"
+    # Combine wind + pressure on one line to make room for METAR
+    lines.append(f"{wind}  {round(cur.get('pressure', 0))} hPa")
+    lines.append(
+        f"Sun {_hhmm(cur.get('sunrise', ''))} - {_hhmm(cur.get('sunset', ''))}"
+    )
+    lines.append(f"Moon {cur.get('moon_phase', '')}")
+
+    # Parse METAR into a compact summary line (ceiling + visibility + dewpoint)
+    # — the unique info the main API doesn't already supply.
+    metar_line = _metar_summary(weather.get("metar"), units)
+    if metar_line:
+        lines.append(metar_line)
 
     for ln in lines:
         _blit_text(screen, ln, fonts.small, COL_TEXT_DIM, (x, meta_y))
         meta_y += line_h
         if meta_y > rect.bottom - pad:
             break
+
+
+def _metar_summary(raw: str | None, units: dict) -> str | None:
+    """Best-effort METAR parse → 'OVC 2200' · Vis 10mi · Dew 45°F'. None on fail."""
+    if not raw:
+        return None
+    try:
+        from metar import Metar
+        m = Metar.Metar(raw)
+    except Exception:
+        return None
+    parts: list[str] = []
+    # Sky: lowest cloud layer with ceiling (BKN/OVC) — else first layer
+    sky = getattr(m, "sky", None) or []
+    ceiling = None
+    for cover, height, *_ in sky:
+        if cover in ("BKN", "OVC") and height is not None:
+            ceiling = (cover, height)
+            break
+    if ceiling is None and sky:
+        cover, height, *_ = sky[0]
+        if height is not None:
+            ceiling = (cover, height)
+    if ceiling is not None:
+        cover, height = ceiling
+        ft = int(height.value("FT")) if hasattr(height, "value") else int(height)
+        parts.append(f"{cover} {ft:,}'")
+    vis = getattr(m, "vis", None)
+    if vis is not None and hasattr(vis, "value"):
+        try:
+            miles = vis.value("SM")
+            parts.append(f"Vis {miles:g}mi")
+        except Exception:
+            pass
+    dewpt = getattr(m, "dewpt", None)
+    if dewpt is not None and hasattr(dewpt, "value"):
+        try:
+            dp = dewpt.value("F" if units["temp"] == "\u00b0F" else "C")
+            parts.append(f"Dew {round(dp)}{units['temp']}")
+        except Exception:
+            pass
+    if not parts:
+        return None
+    return " \u00b7 ".join(parts)
+
+
+def _next_rain_headline(hourly: list[dict], units: dict) -> str | None:
+    """Return 'Rain likely 9 PM (86%)' if any of the next 12 hours crosses 50%."""
+    for h in hourly[:12]:
+        pop = int(h.get("precipitation_probability", 0) or 0)
+        if pop >= 50:
+            label = _time_of(h.get("time", ""))
+            # Use weather-code description if it's rain/snow/thunderstorm; else generic
+            desc = str(h.get("description", "Rain"))
+            word = "Rain"
+            lc = desc.lower()
+            if "snow" in lc:
+                word = "Snow"
+            elif "thunder" in lc:
+                word = "Storms"
+            elif "showers" in lc:
+                word = "Showers"
+            return f"{word} likely {label} ({pop}%)"
+    return None
 
 
 def draw_forecast(
@@ -339,20 +423,31 @@ def draw_forecast(
     units = _units(cfg)
     wind_degrees = bool((cfg or {}).get("wind_degrees"))
     forecast = weather.get("forecast", {})
-    hourly = forecast.get("hourly", [])[:5]
+    hourly_all = forecast.get("hourly", [])
+    hourly = hourly_all[:5]
     daily = forecast.get("daily", [])[:7]
+    alerts = weather.get("alerts", []) or []
 
     pad = 12
     x = rect.x + pad
     y = rect.y + pad
     inner_right = rect.right - pad
 
-    # Distribute vertical space: section titles + 5 hourly + 7 daily rows + small gap.
+    # Active-alert banner (top of panel)
+    if alerts:
+        y = _draw_alert_banner(screen, alerts[0], fonts, x, y, inner_right)
+
+    # 24h sparkline (temperature line + precip-probability bars)
+    sparkline_h = 56
+    if len(hourly_all) >= 4:
+        _draw_sparkline(screen, fonts, units, hourly_all[:24], x, y, inner_right, sparkline_h)
+        y += sparkline_h + 6
+
     title_h = fonts.small_bold.get_height()
     total_rows = len(hourly) + len(daily)
-    available = rect.height - pad * 2 - title_h * 2 - 16
-    row_h = max(48, available // max(1, total_rows))
-    icon_size = max(36, int(row_h * 0.78))
+    remaining = rect.bottom - y - pad - title_h * 2 - 8
+    row_h = max(44, remaining // max(1, total_rows))
+    icon_size = max(34, int(row_h * 0.78))
 
     # HOURLY section
     _draw_section_title(screen, fonts, "HOURLY", x, y, inner_right)
@@ -371,7 +466,7 @@ def draw_forecast(
         y += row_h
 
     # DAILY section
-    y += 6
+    y += 4
     _draw_section_title(screen, fonts, "DAILY", x, y, inner_right)
     y += title_h + 4
     for d in daily:
@@ -389,6 +484,87 @@ def draw_forecast(
         y += row_h
         if y > rect.bottom - row_h // 2:
             break
+
+
+def _severity_color(severity: str) -> tuple[int, int, int]:
+    sev = severity.lower()
+    if sev in ("extreme", "severe"):
+        return (220, 70, 70)
+    if sev == "moderate":
+        return (220, 160, 60)
+    return (180, 180, 120)
+
+
+def _draw_alert_banner(screen, alert: dict, fonts: Fonts, x: int, y: int, right: int) -> int:
+    event = alert.get("event", "Alert")
+    severity = alert.get("severity", "Unknown")
+    colour = _severity_color(severity)
+    pad_x, pad_y = 8, 5
+    surf = fonts.small_bold.render(event, True, (255, 255, 255))
+    width = right - x
+    height = surf.get_height() + pad_y * 2
+    bg = pygame.Surface((width, height), pygame.SRCALPHA)
+    bg.fill(colour + (220,))
+    screen.blit(bg, (x, y))
+    screen.blit(surf, (x + pad_x, y + pad_y))
+    return y + height + 6
+
+
+def _draw_sparkline(
+    screen, fonts: Fonts, units: dict,
+    hourly: list[dict], x: int, y: int, right: int, h: int,
+) -> None:
+    if not hourly:
+        return
+    width = right - x
+    temps = [float(p.get("temperature", 0)) for p in hourly]
+    pops = [int(p.get("precipitation_probability", 0) or 0) for p in hourly]
+    t_min, t_max = min(temps), max(temps)
+    # Clamp so tiny temp swings still show a visible line (at least 4° range).
+    if t_max - t_min < 4:
+        mid = (t_max + t_min) / 2
+        t_min, t_max = mid - 2, mid + 2
+
+    # Panel chrome
+    chart_rect = pygame.Rect(x, y, width, h)
+    chart_bg = pygame.Surface((width, h), pygame.SRCALPHA)
+    chart_bg.fill((0, 0, 0, 120))
+    screen.blit(chart_bg, chart_rect.topleft)
+    pygame.draw.rect(screen, COL_PANEL_BORDER, chart_rect, width=1)
+
+    # Precipitation-probability bars (subtle blue) along the bottom half.
+    bar_w = max(1, width // len(hourly))
+    max_bar_h = int(h * 0.55)
+    for i, pop in enumerate(pops):
+        if pop <= 0:
+            continue
+        bh = int(max_bar_h * (pop / 100))
+        bar = pygame.Surface((bar_w, bh), pygame.SRCALPHA)
+        bar.fill((80, 160, 220, 140))
+        screen.blit(bar, (x + i * bar_w, y + h - bh))
+
+    # Temperature polyline.
+    pts: list[tuple[int, int]] = []
+    for i, t in enumerate(temps):
+        px = x + int((i + 0.5) * bar_w)
+        frac = (t - t_min) / (t_max - t_min)
+        py = y + int((1 - frac) * (h - 10)) + 4
+        pts.append((px, py))
+    if len(pts) >= 2:
+        pygame.draw.lines(screen, COL_TEXT, False, pts, 2)
+
+    # Min/max temperature labels — chip-style so they stay legible over bars
+    lo_text = f"lo {round(t_min)}{units['temp']}"
+    hi_text = f"hi {round(t_max)}{units['temp']}"
+    for text, pos in (
+        (hi_text, (x + 6, y + 4)),
+        (lo_text, (right - fonts.tiny.size(lo_text)[0] - 6, y + h - fonts.tiny.get_height() - 4)),
+    ):
+        surf = fonts.tiny.render(text, True, COL_TEXT)
+        chip = pygame.Surface((surf.get_width() + 6, surf.get_height() + 2), pygame.SRCALPHA)
+        chip.fill((0, 0, 0, 160))
+        screen.blit(chip, (pos[0] - 3, pos[1] - 1))
+        screen.blit(surf, pos)
 
 
 def _draw_section_title(screen, fonts: Fonts, text: str, x: int, y: int, right: int) -> None:
@@ -530,15 +706,19 @@ def draw_radar(
     dst_y = rect.y + (rect.height - dst_h) // 2
     screen.blit(scaled, (dst_x, dst_y))
 
-    # Corner label + time
+    # Corner label + time — bold, opaque chip so it reads while animating
     if frame_time is not None:
         try:
             ts = datetime.fromtimestamp(frame_time).strftime("%-I:%M %p")
         except (OSError, ValueError):
             ts = ""
-        stamp = fonts.tiny.render(f"{label}  {ts}", True, COL_TEXT_DIM)
-        pad = 4
-        bg = pygame.Surface((stamp.get_width() + pad * 2, stamp.get_height() + pad), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 140))
-        screen.blit(bg, (rect.x + 4, rect.y + 4))
-        screen.blit(stamp, (rect.x + 4 + pad, rect.y + 4))
+        stamp = fonts.small_bold.render(f"{label}  {ts}", True, COL_TEXT)
+        pad_x, pad_y = 7, 4
+        bg = pygame.Surface(
+            (stamp.get_width() + pad_x * 2, stamp.get_height() + pad_y * 2),
+            pygame.SRCALPHA,
+        )
+        bg.fill((0, 0, 0, 210))
+        pygame.draw.rect(bg, (255, 255, 255, 40), bg.get_rect(), width=1)
+        screen.blit(bg, (rect.x + 6, rect.y + 6))
+        screen.blit(stamp, (rect.x + 6 + pad_x, rect.y + 6 + pad_y))
