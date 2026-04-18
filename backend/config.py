@@ -64,6 +64,7 @@ class Settings:
     date_locale: str
     labels: Labels
     radars: tuple[RadarMap, ...]
+    google_api_key: str = ""
 
     @property
     def latitude(self) -> float:
@@ -128,6 +129,20 @@ def load(path: Path | None = None) -> Settings:
             radars_raw.append(_coerce_radar(r))
 
     location_raw = get("location", (0.0, 0.0))
+
+    # Pull googleapi from ApiKeys.py at repo root if present.
+    google_api_key = ""
+    apikeys_path = target.parent / "ApiKeys.py"
+    if apikeys_path.is_file():
+        apikeys_spec = importlib.util.spec_from_file_location("user_apikeys", apikeys_path)
+        if apikeys_spec is not None and apikeys_spec.loader is not None:
+            apikeys_mod = importlib.util.module_from_spec(apikeys_spec)
+            try:
+                apikeys_spec.loader.exec_module(apikeys_mod)
+                google_api_key = str(getattr(apikeys_mod, "googleapi", "") or "")
+            except Exception:
+                pass
+
     return Settings(
         location=(float(location_raw[0]), float(location_raw[1])),
         metric=bool(get("metric", False)),
@@ -144,4 +159,5 @@ def load(path: Path | None = None) -> Settings:
         date_locale=str(get("DateLocale", "") or ""),
         labels=labels,
         radars=tuple(radars_raw),
+        google_api_key=google_api_key,
     )

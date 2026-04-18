@@ -64,10 +64,18 @@ class ForecastResponse(BaseModel):
     daily: list[DailyPoint]
 
 
+class WeatherAlert(BaseModel):
+    event: str            # e.g. "Winter Storm Warning"
+    severity: str         # Minor|Moderate|Severe|Extreme|Unknown
+    headline: str
+    ends: str | None = None
+
+
 class WeatherResponse(BaseModel):
     current: CurrentWeather
     forecast: ForecastResponse
     metar: str | None = None
+    alerts: list[WeatherAlert] = []
 
 
 class RadarFrame(BaseModel):

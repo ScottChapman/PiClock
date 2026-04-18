@@ -1,7 +1,9 @@
 #!/bin/bash
-# Startup script for the PiClock (web version).
+# Startup script for the PiClock.
 #
-# Starts the FastAPI backend under uvicorn and launches Chromium in kiosk mode.
+# Starts the FastAPI backend under uvicorn and launches the pygame kiosk
+# display (display/__main__.py). The pygame client is much lighter than a
+# full browser — targeted at 512MB-RAM boards like the Pi Zero 2 W.
 # The legacy PyQt4 launcher is preserved at legacy/startup.sh.orig for reference.
 #
 # Designed to be started from PiClock.desktop (autostart) or crontab:
@@ -75,23 +77,10 @@ if ! curl -fsS "${BACKEND_URL}/healthz" >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Launching Chromium in kiosk mode → ${BACKEND_URL}"
-BROWSER=""
-for c in chromium-browser chromium google-chrome; do
-    if command -v "$c" >/dev/null 2>&1; then
-        BROWSER="$c"
-        break
-    fi
-done
-if [ -z "$BROWSER" ]; then
-    echo "No chromium/chrome found in PATH. Backend is running at ${BACKEND_URL}; open it manually."
-    wait "${BACKEND_PID}"
-    exit 0
-fi
+echo "Launching pygame kiosk display…"
+export PICLOCK_BACKEND="${BACKEND_URL}"
+uv run python -m display
 
-"${BROWSER}" --kiosk --noerrdialogs --disable-infobars \
-    --disable-session-crashed-bubble --app="${BACKEND_URL}"
-
-echo "Browser exited; stopping backend."
+echo "Display exited; stopping backend."
 kill "${BACKEND_PID}" 2>/dev/null
 wait "${BACKEND_PID}" 2>/dev/null || true

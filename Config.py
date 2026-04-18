@@ -45,7 +45,7 @@ LSnow = ' Snow: '
 radar1 = {
     'center': (42.5911248, -71.5692887),
     'zoom': 7,
-    'satellite': False,
+    'satellite': True,
     'markers': [
         {'location': (42.5911248, -71.5692887), 'color': 'red', 'size': 'small'},
     ],
@@ -54,7 +54,7 @@ radar1 = {
 radar2 = {
     'center': (42.5911248, -71.5692887),
     'zoom': 10,
-    'satellite': False,
+    'satellite': True,
     'markers': [
         {'location': (42.5911248, -71.5692887), 'color': 'red', 'size': 'small'},
     ],

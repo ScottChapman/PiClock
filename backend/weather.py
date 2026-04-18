@@ -18,6 +18,7 @@ from .models import (
     DailyPoint,
     ForecastResponse,
     HourlyPoint,
+    WeatherAlert,
     WeatherResponse,
 )
 
@@ -166,7 +167,7 @@ def _normalize(data: dict, settings: Settings) -> WeatherResponse:
             uv_index=float(hourly["uv_index"][i] or 0.0),
             dewpoint=float(hourly["dew_point_2m"][i] or 0.0),
         ))
-        if len(hourly_points) >= 5:
+        if len(hourly_points) >= 24:
             break
 
     daily_points: list[DailyPoint] = []
@@ -190,7 +191,7 @@ def _normalize(data: dict, settings: Settings) -> WeatherResponse:
 
     return WeatherResponse(
         current=current,
-        forecast=ForecastResponse(hourly=hourly_points[:5], daily=daily_points[:7]),
+        forecast=ForecastResponse(hourly=hourly_points[:24], daily=daily_points[:7]),
     )
 
 
@@ -229,12 +230,20 @@ async def fetch(settings: Settings, client: httpx.AsyncClient | None = None) -> 
             await client.aclose()
 
     weather = _normalize(data, settings)
+    updates: dict = {}
     if settings.METAR:
-        weather = weather.model_copy(update={"metar": await _fetch_metar(settings.METAR)})
+        updates["metar"] = await _fetch_metar(settings.METAR)
+    alerts = await _fetch_alerts(settings.latitude, settings.longitude)
+    if alerts:
+        updates["alerts"] = alerts
+    if updates:
+        weather = weather.model_copy(update=updates)
     return weather
 
 
 _METAR_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/stations/{station}.TXT"
+_NWS_ALERTS_URL = "https://api.weather.gov/alerts/active"
+_NWS_HEADERS = {"User-Agent": "PiClock/1.0 (contact github.com/ScottChapman/PiClock)"}
 
 
 async def _fetch_metar(station: str) -> str | None:
@@ -247,3 +256,26 @@ async def _fetch_metar(station: str) -> str | None:
         return lines[-1] if lines else None
     except (httpx.HTTPError, asyncio.TimeoutError):
         return None
+
+
+async def _fetch_alerts(lat: float, lng: float) -> list[WeatherAlert]:
+    """NWS active alerts for a point. Returns [] on any failure (non-US, offline)."""
+    params = {"point": f"{lat},{lng}"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_NWS_ALERTS_URL, params=params, headers=_NWS_HEADERS)
+        if resp.status_code != 200:
+            return []
+        features = resp.json().get("features", [])
+    except (httpx.HTTPError, asyncio.TimeoutError, ValueError):
+        return []
+    alerts: list[WeatherAlert] = []
+    for f in features:
+        p = f.get("properties", {})
+        alerts.append(WeatherAlert(
+            event=str(p.get("event", "Alert")),
+            severity=str(p.get("severity", "Unknown")),
+            headline=str(p.get("headline") or p.get("event", "")),
+            ends=p.get("ends") or p.get("expires"),
+        ))
+    return alerts
