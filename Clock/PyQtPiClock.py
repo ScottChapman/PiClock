@@ -1646,7 +1646,8 @@ class Radar(QtGui.QLabel):
         self.retries = 0
         self.corners = getCorners(self.point, self.zoom,
                                   rect.width(), rect.height())
-        self.baseTime = 0
+        self.radarFrames = {}
+        self.radarHost = "tilecache.rainviewer.com"
         self.cornerTiles = {
          "NW": getTileXY(LatLng(self.corners["N"],
                                 self.corners["W"]), self.zoom),
@@ -1714,7 +1715,7 @@ class Radar(QtGui.QLabel):
 
     def rtick(self):
         if time.time() > (self.lastget + self.interval):
-            self.get(time.time())
+            self.getRadarFrames()
             self.lastget = time.time()
         if len(self.frameImages) < 1:
             return
@@ -1729,40 +1730,51 @@ class Radar(QtGui.QLabel):
         if self.displayedFrame >= len(self.frameImages):
             self.displayedFrame = 0
 
-    def get(self, t=0):
-        t = int(t / 600)*600
-        if t > 0 and self.baseTime == t:
+    def getRadarFrames(self):
+        self.framesreq = QNetworkRequest(QUrl(
+            "https://api.rainviewer.com/public/weather-maps.json"))
+        self.framesreply = manager.get(self.framesreq)
+        QtCore.QObject.connect(self.framesreply, QtCore.SIGNAL(
+            "finished()"), self.getRadarFramesReply)
+
+    def getRadarFramesReply(self):
+        if self.framesreply.error() != QNetworkReply.NoError:
             return
-        if t == 0:
-            t = self.baseTime
-        else:
-            self.baseTime = t
+        try:
+            data = json.loads(str(self.framesreply.readAll()))
+        except ValueError:
+            return
+        self.radarHost = data.get("host", "tilecache.rainviewer.com")
+        past = data.get("radar", {}).get("past", [])
+        self.radarFrames = dict((f["time"], f["path"]) for f in past)
+        self.get()
+
+    def get(self):
+        if not self.radarFrames:
+            return
+        availTimes = sorted(self.radarFrames.keys())
+        recentTimes = availTimes[-self.anim:]
         newf = []
         for f in self.frameImages:
-            if f["time"] >= (t - self.anim * 600):
+            if f["time"] in recentTimes:
                 newf.append(f)
         self.frameImages = newf
-        firstt = t - self.anim * 600
-        for tt in range(firstt, t+1, 600):
-            print "get... " + str(tt) + " " + self.myname
-            gotit = False
-            for f in self.frameImages:
-                if f["time"] == tt:
-                    gotit = True
-            if not gotit:
+        cachedTimes = set(f["time"] for f in self.frameImages)
+        for tt in recentTimes:
+            if tt not in cachedTimes:
+                print "get... " + str(tt) + " " + self.myname
                 self.getTiles(tt)
                 break
 
     def getTiles(self, t, i=0):
-        t = int(t / 600)*600
         self.getTime = t
         self.getIndex = i
         if i == 0:
             self.tileurls = []
             self.tileQimages = []
+            path = self.radarFrames.get(t, "")
             for tt in self.tiletails:
-                tileurl = "https://tilecache.rainviewer.com/v2/radar/%d/%s" \
-                    % (t, tt)
+                tileurl = "https://" + self.radarHost + path + tt
                 self.tileurls.append(tileurl)
         print self.myname + " " + str(self.getIndex) + " " + self.tileurls[i]
         self.tilereq = QNetworkRequest(QUrl(self.tileurls[i]))
