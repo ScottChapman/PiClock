@@ -73,6 +73,7 @@ class DailyPoint:
 class ForecastResponse:
     hourly: list[HourlyPoint]
     daily: list[DailyPoint]
+    today_hourly: list[HourlyPoint] = field(default_factory=list)
 
 
 @dataclass

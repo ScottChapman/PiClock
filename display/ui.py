@@ -423,9 +423,10 @@ def draw_forecast(
     wind_degrees = bool((cfg or {}).get("wind_degrees"))
     forecast = weather.get("forecast", {})
     hourly_all = forecast.get("hourly", [])
-    hourly = hourly_all[:5]
-    daily = forecast.get("daily", [])[:7]
+    hourly = hourly_all[:4]
+    daily = forecast.get("daily", [])[:6]
     alerts = weather.get("alerts", []) or []
+    today_hourly = forecast.get("today_hourly") or hourly_all
 
     pad = 12
     x = rect.x + pad
@@ -436,11 +437,22 @@ def draw_forecast(
     if alerts:
         y = _draw_alert_banner(screen, alerts[0], fonts, x, y, inner_right)
 
-    # 24h sparkline (temperature line + precip-probability bars)
-    sparkline_h = 56
-    if len(hourly_all) >= 4:
-        _draw_sparkline(screen, fonts, units, hourly_all[:24], x, y, inner_right, sparkline_h)
-        y += sparkline_h + 6
+    # Today-at-a-glance diorama ribbon (sky gradient + temp curve + precip).
+    diorama_h = 176
+    if len(today_hourly) >= 8:
+        from .diorama import draw_day_diorama
+        draw_day_diorama(
+            screen,
+            pygame.Rect(x, y, inner_right - x, diorama_h),
+            today_hourly,
+            daily[0] if daily else None,
+            weather.get("current", {}),
+            assets,
+            fonts,
+            units,
+            datetime.now(),
+        )
+        y += diorama_h + 6
 
     title_h = fonts.small_bold.get_height()
     total_rows = len(hourly) + len(daily)
@@ -451,7 +463,7 @@ def draw_forecast(
     # HOURLY section
     _draw_section_title(screen, fonts, "HOURLY", x, y, inner_right)
     y += title_h + 4
-    for h in hourly:
+    for i, h in enumerate(hourly):
         _draw_forecast_row(
             screen, fonts, assets,
             x, y, inner_right, row_h, icon_size,
@@ -461,6 +473,7 @@ def draw_forecast(
             meta=_hourly_meta(h, units, wind_degrees),
             right_top=f"{round(h.get('temperature', 0))}{units['temp']}",
             right_bot=f"feels {round(h.get('apparent_temperature', 0))}\u00b0",
+            top_rule=i > 0,
         )
         y += row_h
 
@@ -468,7 +481,7 @@ def draw_forecast(
     y += 4
     _draw_section_title(screen, fonts, "DAILY", x, y, inner_right)
     y += title_h + 4
-    for d in daily:
+    for i, d in enumerate(daily):
         _draw_forecast_row(
             screen, fonts, assets,
             x, y, inner_right, row_h, icon_size,
@@ -479,6 +492,7 @@ def draw_forecast(
             right_top=f"{round(d.get('temperature_min', 0))}\u00b0/"
                       f"{round(d.get('temperature_max', 0))}{units['temp']}",
             right_bot=_sun_times(d),
+            top_rule=i > 0,
         )
         y += row_h
         if y > rect.bottom - row_h // 2:
@@ -509,63 +523,6 @@ def _draw_alert_banner(screen, alert: dict, fonts: Fonts, x: int, y: int, right:
     return y + height + 6
 
 
-def _draw_sparkline(
-    screen, fonts: Fonts, units: dict,
-    hourly: list[dict], x: int, y: int, right: int, h: int,
-) -> None:
-    if not hourly:
-        return
-    width = right - x
-    temps = [float(p.get("temperature", 0)) for p in hourly]
-    pops = [int(p.get("precipitation_probability", 0) or 0) for p in hourly]
-    t_min, t_max = min(temps), max(temps)
-    # Clamp so tiny temp swings still show a visible line (at least 4° range).
-    if t_max - t_min < 4:
-        mid = (t_max + t_min) / 2
-        t_min, t_max = mid - 2, mid + 2
-
-    # Panel chrome
-    chart_rect = pygame.Rect(x, y, width, h)
-    chart_bg = pygame.Surface((width, h), pygame.SRCALPHA)
-    chart_bg.fill((0, 0, 0, 120))
-    screen.blit(chart_bg, chart_rect.topleft)
-    pygame.draw.rect(screen, COL_PANEL_BORDER, chart_rect, width=1)
-
-    # Precipitation-probability bars (subtle blue) along the bottom half.
-    bar_w = max(1, width // len(hourly))
-    max_bar_h = int(h * 0.55)
-    for i, pop in enumerate(pops):
-        if pop <= 0:
-            continue
-        bh = int(max_bar_h * (pop / 100))
-        bar = pygame.Surface((bar_w, bh), pygame.SRCALPHA)
-        bar.fill((80, 160, 220, 140))
-        screen.blit(bar, (x + i * bar_w, y + h - bh))
-
-    # Temperature polyline.
-    pts: list[tuple[int, int]] = []
-    for i, t in enumerate(temps):
-        px = x + int((i + 0.5) * bar_w)
-        frac = (t - t_min) / (t_max - t_min)
-        py = y + int((1 - frac) * (h - 10)) + 4
-        pts.append((px, py))
-    if len(pts) >= 2:
-        pygame.draw.lines(screen, COL_TEXT, False, pts, 2)
-
-    # Min/max temperature labels — chip-style so they stay legible over bars
-    lo_text = f"lo {round(t_min)}{units['temp']}"
-    hi_text = f"hi {round(t_max)}{units['temp']}"
-    for text, pos in (
-        (hi_text, (x + 6, y + 4)),
-        (lo_text, (right - fonts.tiny.size(lo_text)[0] - 6, y + h - fonts.tiny.get_height() - 4)),
-    ):
-        surf = fonts.tiny.render(text, True, COL_TEXT)
-        chip = pygame.Surface((surf.get_width() + 6, surf.get_height() + 2), pygame.SRCALPHA)
-        chip.fill((0, 0, 0, 160))
-        screen.blit(chip, (pos[0] - 3, pos[1] - 1))
-        screen.blit(surf, pos)
-
-
 def _draw_section_title(screen, fonts: Fonts, text: str, x: int, y: int, right: int) -> None:
     # Small-caps-style section label with a thin rule alongside it.
     surf = fonts.small_bold.render(text, True, COL_TEXT_MUTED)
@@ -577,38 +534,50 @@ def _draw_section_title(screen, fonts: Fonts, text: str, x: int, y: int, right: 
 
 
 def _hourly_meta(h: dict, units: dict, wind_degrees: bool) -> str:
-    wd = f"{h.get('wind_direction', 0)}\u00b0" if wind_degrees else wind_cardinal(h.get("wind_direction", 0))
-    ws = round(h.get("wind_speed", 0))
-    wind = f"{wd} {ws}{units['speed']}"
-    gust = h.get("wind_gust") or 0
-    if gust and gust > h.get("wind_speed", 0) + 3:
-        wind += f" g{round(gust)}"
-    parts = [wind, f"{h.get('humidity', 0)}%RH"]
+    # Priority order: rain (most actionable) → wind → humidity → UV.
+    parts: list[str] = []
     pop = h.get("precipitation_probability", 0) or 0
     precip = h.get("precipitation", 0) or 0
     if pop or precip > 0:
-        rain = f"{pop}%"
+        rain = f"{pop}% rain"
         if precip > 0:
             rain += f" {precip:.2f}{units['precip']}"
         parts.append(rain)
+    parts.append(_wind_phrase(h.get("wind_direction", 0),
+                              h.get("wind_speed", 0),
+                              h.get("wind_gust") or 0,
+                              units, wind_degrees))
+    parts.append(f"{h.get('humidity', 0)}% humid")
     uv = h.get("uv_index", 0) or 0
-    if uv >= 1:
-        parts.append(f"UV{round(uv)}")
+    if uv >= 3:
+        parts.append(f"UV {round(uv)}")
     return " \u00b7 ".join(parts)
 
 
 def _daily_meta(d: dict, units: dict, wind_degrees: bool) -> str:
-    wd = f"{d.get('wind_direction', 0)}\u00b0" if wind_degrees else wind_cardinal(d.get("wind_direction", 0))
-    ws = round(d.get("wind_speed_max", 0))
-    parts = [f"{wd} {ws}{units['speed']}"]
+    parts: list[str] = []
     pop = d.get("precipitation_probability", 0) or 0
     precip = d.get("precipitation_sum", 0) or 0
     if pop or precip > 0:
-        rain = f"{pop}%"
+        rain = f"{pop}% rain"
         if precip > 0:
             rain += f" {precip:.2f}{units['precip']}"
         parts.append(rain)
+    parts.append(_wind_phrase(d.get("wind_direction", 0),
+                              d.get("wind_speed_max", 0),
+                              0,
+                              units, wind_degrees))
     return " \u00b7 ".join(parts)
+
+
+def _wind_phrase(direction: int, speed: float, gust: float,
+                 units: dict, wind_degrees: bool) -> str:
+    wd = f"{direction}\u00b0" if wind_degrees else wind_cardinal(direction)
+    ws = round(speed)
+    # Use range notation when gusts are notably higher than sustained.
+    if gust and gust > speed + 3:
+        return f"{wd} {ws}\u2013{round(gust)} {units['speed']}"
+    return f"{wd} {ws} {units['speed']}"
 
 
 def _sun_times(d: dict) -> str:
@@ -626,7 +595,11 @@ def _draw_forecast_row(
     label: str, icon_name: str,
     primary: str, meta: str,
     right_top: str, right_bot: str | None,
+    top_rule: bool = False,
 ) -> None:
+    if top_rule:
+        pygame.draw.line(screen, (*COL_PANEL_BORDER[:3], 100),
+                         (x, y), (right, y), 1)
     # Left gutter: time/weekday label — bigger, more prominent
     label_w = max(fonts.small_bold.size("00:00 PM")[0], fonts.small_bold.size("Wed")[0]) + 4
     label_surf = fonts.small_bold.render(label, True, COL_TEXT)
@@ -662,9 +635,6 @@ def _draw_forecast_row(
     screen.blit(primary_surf, (desc_x, ty))
     screen.blit(meta_surf, (desc_x, ty + primary_surf.get_height()))
 
-    # Hairline row separator
-    pygame.draw.line(screen, (*COL_PANEL_BORDER[:3], 100),
-                     (x, y + row_h - 1), (right, y + row_h - 1), 1)
 
 
 def _clip(text: str, font: pygame.font.Font, max_w: int) -> str:
@@ -695,15 +665,19 @@ def draw_radar(
         _blit_text(screen, "Radar loading…", fonts.small, COL_TEXT_DIM,
                    (rect.x + 10, rect.y + 10))
         return
-    # Scale the pre-rendered PNG (typically 512x512) to fit the panel.
+    # Cover-scale the pre-rendered PNG (typically 512x512) so it fills the
+    # panel, then mask with a rounded rectangle so corners match the chrome.
     src_w, src_h = frame_surface.get_size()
-    scale = min(rect.width / src_w, rect.height / src_h)
+    scale = max(rect.width / src_w, rect.height / src_h)
     dst_w = int(src_w * scale)
     dst_h = int(src_h * scale)
     scaled = pygame.transform.smoothscale(frame_surface, (dst_w, dst_h))
-    dst_x = rect.x + (rect.width - dst_w) // 2
-    dst_y = rect.y + (rect.height - dst_h) // 2
-    screen.blit(scaled, (dst_x, dst_y))
+    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    panel.blit(scaled, ((rect.width - dst_w) // 2, (rect.height - dst_h) // 2))
+    mask = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=8)
+    panel.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    screen.blit(panel, rect.topleft)
 
     # Corner label + time — bold, opaque chip so it reads while animating
     if frame_time is not None:

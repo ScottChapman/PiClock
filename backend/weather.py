@@ -7,7 +7,7 @@ and sunrise/sunset. No API key required.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import httpx
 from astral import moon
@@ -142,33 +142,27 @@ def _normalize(data: dict, settings: Settings) -> WeatherResponse:
         observed_at=cur["time"],
     )
 
-    # Hourly: pick next 9 slots starting from the hour after now
+    # Hourly: pick next 24 slots starting from the hour after now
     now = datetime.fromisoformat(cur["time"])
     hourly_points: list[HourlyPoint] = []
     for i, t in enumerate(hourly["time"]):
         dt = datetime.fromisoformat(t)
         if dt < now:
             continue
-        hc = int(hourly["weather_code"][i])
-        hourly_points.append(HourlyPoint(
-            time=t,
-            temperature=float(hourly["temperature_2m"][i]),
-            apparent_temperature=float(hourly["apparent_temperature"][i]),
-            humidity=int(hourly["relative_humidity_2m"][i] or 0),
-            weather_code=hc,
-            icon=icon_for(hc, _is_daylight_for(t, daily)),
-            description=describe(hc),
-            precipitation=float(hourly["precipitation"][i] or 0.0),
-            precipitation_probability=int(hourly["precipitation_probability"][i] or 0),
-            wind_speed=float(hourly["wind_speed_10m"][i] or 0.0),
-            wind_direction=int(hourly["wind_direction_10m"][i] or 0),
-            wind_gust=float(hourly["wind_gusts_10m"][i] or 0.0),
-            cloud_cover=int(hourly["cloud_cover"][i] or 0),
-            uv_index=float(hourly["uv_index"][i] or 0.0),
-            dewpoint=float(hourly["dew_point_2m"][i] or 0.0),
-        ))
+        hourly_points.append(_build_hourly_point(hourly, i, t, daily))
         if len(hourly_points) >= 24:
             break
+
+    # Today-hourly: today 00:00 local → tomorrow 00:00 local, inclusive.
+    # Needed by the day-diorama renderer, which wants a fixed calendar day.
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow_start = today_start + timedelta(days=1)
+    today_hourly_points: list[HourlyPoint] = []
+    for i, t in enumerate(hourly["time"]):
+        dt = datetime.fromisoformat(t)
+        if dt < today_start or dt > tomorrow_start:
+            continue
+        today_hourly_points.append(_build_hourly_point(hourly, i, t, daily))
 
     daily_points: list[DailyPoint] = []
     for i, d in enumerate(daily["time"]):
@@ -191,7 +185,32 @@ def _normalize(data: dict, settings: Settings) -> WeatherResponse:
 
     return WeatherResponse(
         current=current,
-        forecast=ForecastResponse(hourly=hourly_points[:24], daily=daily_points[:7]),
+        forecast=ForecastResponse(
+            hourly=hourly_points[:24],
+            daily=daily_points[:7],
+            today_hourly=today_hourly_points,
+        ),
+    )
+
+
+def _build_hourly_point(hourly: dict, i: int, t: str, daily: dict) -> HourlyPoint:
+    hc = int(hourly["weather_code"][i])
+    return HourlyPoint(
+        time=t,
+        temperature=float(hourly["temperature_2m"][i]),
+        apparent_temperature=float(hourly["apparent_temperature"][i]),
+        humidity=int(hourly["relative_humidity_2m"][i] or 0),
+        weather_code=hc,
+        icon=icon_for(hc, _is_daylight_for(t, daily)),
+        description=describe(hc),
+        precipitation=float(hourly["precipitation"][i] or 0.0),
+        precipitation_probability=int(hourly["precipitation_probability"][i] or 0),
+        wind_speed=float(hourly["wind_speed_10m"][i] or 0.0),
+        wind_direction=int(hourly["wind_direction_10m"][i] or 0),
+        wind_gust=float(hourly["wind_gusts_10m"][i] or 0.0),
+        cloud_cover=int(hourly["cloud_cover"][i] or 0),
+        uv_index=float(hourly["uv_index"][i] or 0.0),
+        dewpoint=float(hourly["dew_point_2m"][i] or 0.0),
     )
 
 
