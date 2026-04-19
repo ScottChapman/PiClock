@@ -1,20 +1,17 @@
 [project]
 name = "piclock"
 version = "0.1.0"
-requires-python = ">=3.11,<3.14"
+# Pi OS Trixie ships Python 3.13 natively; macOS is whatever's available.
+requires-python = ">=3.11"
+# Lean runtime: pygame for rendering, httpx for the two APIs we hit
+# (Open-Meteo, RainViewer, NWS alerts, optional METAR), astral for moon
+# phase, metar for METAR parsing. No HTTP server, no templating, no
+# validation layer — the UI consumes plain Python dicts/dataclasses.
 dependencies = [
     "astral>=3.2",
-    # fastapi/pydantic pinned pre-v2 so pydantic_core (Rust, glibc 2.34+) is
-    # never installed — the Rust wheel fails to load on Raspbian Buster's
-    # glibc 2.28. If you move to Pi OS Bookworm you can drop these caps.
-    "fastapi>=0.95,<0.100",
-    "pydantic>=1.10,<2",
     "httpx>=0.28.1",
-    "jinja2>=3.1.6",
     "metar>=2.0.1",
     "pygame-ce>=2.5.2",
-    "sse-starlette>=1.6,<2",
-    "uvicorn>=0.20,<0.30",
 ]
 
 [dependency-groups]
@@ -25,13 +22,13 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["backend/tests"]
+testpaths = ["tests"]
+pythonpath = ["."]
 
-# Pi (armv7l) users: piwheels hosts prebuilt wheels that avoid compiling
-# Pillow / pygame from source. Pass it via CLI when syncing on the Pi:
+# Pi users: piwheels hosts prebuilt armv7l/aarch64 wheels that avoid
+# compiling pygame from source. Invoke sync like:
 #
 #   uv sync --extra-index-url https://www.piwheels.org/simple/
 #
-# It's intentionally NOT listed as a project index here — having piwheels
-# in pyproject forces uv's resolver to consider it on macOS too, and since
-# piwheels only publishes Linux/armv7l wheels, that breaks the Mac sync.
+# Intentionally not listed here — a project-level piwheels index forces
+# uv to consider it on macOS too, where it breaks resolution.

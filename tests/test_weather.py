@@ -7,7 +7,7 @@ import pytest
 from backend import config, weather
 
 
-ICONS_DIR = Path(__file__).resolve().parents[1] / "static" / "icons-lightblue"
+ICONS_DIR = Path(__file__).resolve().parents[1] / "backend" / "static" / "icons-lightblue"
 
 
 def test_wmo_map_covers_expected_codes():

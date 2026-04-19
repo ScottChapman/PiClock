@@ -64,20 +64,20 @@ async def test_render_frame_composites_basemap_and_radar():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        png = await renderer.render_frame(
+        surf = await renderer.render_frame(
             client,
             host="https://tilecache.rainviewer.com",
             frame_path="/v2/radar/1700000000/0",
             frame_time=1700000000,
         )
 
-    # Output round-trips through pygame as a real image of the right size
-    surf = pygame.image.load(io.BytesIO(png), "out.png")
+    assert isinstance(surf, pygame.Surface)
     assert surf.get_size() == (256, 256)
     assert any("basemaps.cartocdn.com" in u for u in calls)
     assert any("tilecache.rainviewer.com" in u for u in calls)
-    assert renderer._frames[1700000000] == png
+    assert renderer._frames[1700000000] is surf
 
+    # Second call reuses the cached Surface (no additional HTTP calls)
     before = len(calls)
     again = await renderer.render_frame(
         client,
@@ -85,7 +85,7 @@ async def test_render_frame_composites_basemap_and_radar():
         frame_path="/v2/radar/1700000000/0",
         frame_time=1700000000,
     )
-    assert again == png
+    assert again is surf
     assert len(calls) == before
 
 
@@ -119,8 +119,9 @@ async def test_basemap_is_only_fetched_once():
 def test_prune_drops_unused_frames():
     cfg = RadarMap(center=(0.0, 0.0), zoom=2)
     r = rr.RadarRenderer(cfg, size=(128, 128))
-    r._frames[1] = b"x"
-    r._frames[2] = b"y"
-    r._frames[3] = b"z"
+    pygame.init()
+    r._frames[1] = pygame.Surface((1, 1))
+    r._frames[2] = pygame.Surface((1, 1))
+    r._frames[3] = pygame.Surface((1, 1))
     r.prune({2})
     assert set(r._frames.keys()) == {2}

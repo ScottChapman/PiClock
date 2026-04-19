@@ -230,17 +230,9 @@ async def fetch(settings: Settings, client: httpx.AsyncClient | None = None) -> 
             await client.aclose()
 
     weather = _normalize(data, settings)
-    updates: dict = {}
     if settings.METAR:
-        updates["metar"] = await _fetch_metar(settings.METAR)
-    alerts = await _fetch_alerts(settings.latitude, settings.longitude)
-    if alerts:
-        updates["alerts"] = alerts
-    if updates:
-        # pydantic v2 uses model_copy, v1 uses copy. Runtime dispatch so the
-        # code works on Raspbian Buster (pinned v1) and modern stacks (v2).
-        copier = getattr(weather, "model_copy", None) or weather.copy
-        weather = copier(update=updates)
+        weather.metar = await _fetch_metar(settings.METAR)
+    weather.alerts = await _fetch_alerts(settings.latitude, settings.longitude)
     return weather
 
 

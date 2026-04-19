@@ -1,8 +1,8 @@
-"""RainViewer radar metadata proxy.
+"""RainViewer metadata fetcher.
 
-Thin wrapper around RainViewer's public weather-maps index. The frontend
-consumes the returned JSON directly (via leaflet-rainviewer) — we only
-expose this through our own origin to keep CORS simple.
+Thin wrapper around RainViewer's public weather-maps index. Returns the
+tile server host and the list of recent radar frames. The RadarRenderer
+consumes this to fetch + composite tiles per frame.
 """
 
 from __future__ import annotations

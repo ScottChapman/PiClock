@@ -151,10 +151,9 @@ def load_assets(layout: Layout, config: dict | None) -> Assets:
     second_hand = _scale_hand("sechand.png")
 
     background = None
-    bg_url = (config or {}).get("background_url", "")
-    if bg_url.startswith("/bg/"):
-        bg_path = REPO_ROOT / bg_url[len("/bg/"):]
-        background = _safe_load(bg_path)
+    bg_name = (config or {}).get("background", "")
+    if bg_name:
+        background = _safe_load(REPO_ROOT / bg_name)
         if background is not None:
             background = pygame.transform.smoothscale(background, layout.screen.size)
 

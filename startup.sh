@@ -1,10 +1,9 @@
 #!/bin/bash
-# Startup script for the PiClock.
+# PiClock kiosk launcher.
 #
-# Starts the FastAPI backend under uvicorn and launches the pygame kiosk
-# display (display/__main__.py). The pygame client is much lighter than a
-# full browser — targeted at 512MB-RAM boards like the Pi Zero 2 W.
-# The legacy PyQt4 launcher is preserved at legacy/startup.sh.orig for reference.
+# Single pygame process — no uvicorn, no browser. All data fetching
+# (weather, radar, alerts) runs in the same event loop as the UI.
+# Targeted at 512 MB boards like the Pi Zero 2 W.
 #
 # Designed to be started from PiClock.desktop (autostart) or crontab:
 #   @reboot sh /home/pi/PiClock/startup.sh
@@ -18,8 +17,8 @@ if [ -z "${DISPLAY:-}" ]; then
 fi
 
 # Wait for X/desktop unless overridden.
-MSG="echo Waiting 45 seconds before starting"
-DELAY="sleep 45"
+MSG="echo Waiting 20 seconds before starting"
+DELAY="sleep 20"
 if [ "${1:-}" = "-n" ] || [ "${1:-}" = "--no-sleep" ] || [ "${1:-}" = "--no-delay" ]; then
     MSG=""
     DELAY=""
@@ -47,40 +46,11 @@ if ! pgrep unclutter >/dev/null 2>&1; then
     unclutter >/dev/null 2>&1 &
 fi
 
-PORT=8000
-BACKEND_URL="http://127.0.0.1:${PORT}"
-
 echo "Rotating log files...."
-rm -f uvicorn.7.log
+rm -f piclock.7.log
 for i in 6 5 4 3 2 1; do
-    mv -f "uvicorn.${i}.log" "uvicorn.$((i+1)).log" 2>/dev/null || true
+    mv -f "piclock.${i}.log" "piclock.$((i+1)).log" 2>/dev/null || true
 done
 
-echo "Starting PiClock backend (uvicorn) → logs: uvicorn.1.log"
-uv run uvicorn backend.main:app --host 127.0.0.1 --port "${PORT}" --workers 1 \
-    > uvicorn.1.log 2>&1 &
-BACKEND_PID=$!
-
-# Wait for /healthz (max 20s)
-echo "Waiting for backend to become ready...."
-for _ in $(seq 1 20); do
-    if curl -fsS "${BACKEND_URL}/healthz" >/dev/null 2>&1; then
-        break
-    fi
-    sleep 1
-done
-
-if ! curl -fsS "${BACKEND_URL}/healthz" >/dev/null 2>&1; then
-    echo "Backend failed to start — tail of uvicorn.1.log:"
-    tail -40 uvicorn.1.log
-    kill "${BACKEND_PID}" 2>/dev/null
-    exit 1
-fi
-
-echo "Launching pygame kiosk display…"
-export PICLOCK_BACKEND="${BACKEND_URL}"
-uv run python -m display
-
-echo "Display exited; stopping backend."
-kill "${BACKEND_PID}" 2>/dev/null
-wait "${BACKEND_PID}" 2>/dev/null || true
+echo "Launching PiClock (pygame) → logs: piclock.1.log"
+exec uv run python -m display > piclock.1.log 2>&1

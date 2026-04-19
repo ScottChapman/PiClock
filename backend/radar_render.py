@@ -90,13 +90,6 @@ def _load_png(data: bytes) -> pygame.Surface | None:
         return None
 
 
-def _png_bytes(surf: pygame.Surface) -> bytes:
-    """Encode a Surface to PNG bytes via pygame.image.save."""
-    buf = io.BytesIO()
-    pygame.image.save(surf, buf, "frame.png")
-    return buf.getvalue()
-
-
 def _resize(surf: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
     return pygame.transform.smoothscale(surf, size)
 
@@ -290,7 +283,7 @@ class RadarRenderer:
         self._radar_box = _compute_box(cfg.center, self._radar_zoom, radar_render_size)
         self._basemap: pygame.Surface | None = None
         self._lock = asyncio.Lock()
-        self._frames: dict[int, bytes] = {}
+        self._frames: dict[int, pygame.Surface] = {}
 
     @property
     def zoom(self) -> int:
@@ -325,7 +318,8 @@ class RadarRenderer:
         host: str,
         frame_path: str,
         frame_time: int,
-    ) -> bytes:
+    ) -> pygame.Surface:
+        """Return the composited frame as a pygame Surface (no PNG round-trip)."""
         if frame_time in self._frames:
             return self._frames[frame_time]
         base = await self.ensure_basemap(client)
@@ -349,12 +343,11 @@ class RadarRenderer:
         frame = base.copy()
         frame.blit(overlay, (0, 0))
         _draw_markers(frame, self._basemap_box, self._basemap_zoom, self.cfg.markers)
-        png = _png_bytes(frame)
-        self._frames[frame_time] = png
-        return png
+        self._frames[frame_time] = frame
+        return frame
 
     def prune(self, keep_times: set[int]) -> None:
-        """Drop cached PNG bytes for frames no longer in the active list."""
+        """Drop cached Surfaces for frames no longer in the active list."""
         for t in list(self._frames):
             if t not in keep_times:
                 self._frames.pop(t, None)
