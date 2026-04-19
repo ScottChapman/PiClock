@@ -20,22 +20,13 @@ from __future__ import annotations
 import asyncio
 import io
 import math
-import os
 from dataclasses import dataclass
 from typing import Iterable
 
 import httpx
-
-# The backend process is headless; use SDL's dummy video driver so
-# pygame can create surfaces without opening a display.
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from .config import Marker, RadarMap
-
-# Ensure pygame's image subsystem is ready (PNG load/save). This is
-# cheap to call repeatedly and required before any Surface work.
-pygame.init()
 
 TILE_SIZE = 256
 # Fallback tile-based basemap used when no Google Static Maps key is set.

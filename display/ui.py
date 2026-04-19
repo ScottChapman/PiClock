@@ -130,13 +130,13 @@ def load_assets(layout: Layout, config: dict | None) -> Assets:
     clock_side = layout.clock.width
     face = _safe_load(IMAGES_DIR / "clockface3.png")
     if face is not None:
-        # The PNG has "QUARTZ" baked in cyan at ~24% below centre. Zero out
-        # the alpha in that band so the background shows through instead.
-        fw, fh = face.get_size()
-        hide = pygame.Rect(0, 0, int(fw * 0.26), int(fh * 0.06))
-        hide.center = (fw // 2, fh // 2 + int(fh * 0.245))
-        face.fill((0, 0, 0, 0), hide)
+        # Scale first, then zero out the alpha band where "QUARTZ" sits in
+        # the source PNG (~24% below centre). Doing it after smoothscale
+        # avoids bilinear-interpolation ghosting at the cleared band's edges.
         face = pygame.transform.smoothscale(face, (clock_side, clock_side))
+        hide = pygame.Rect(0, 0, int(clock_side * 0.30), int(clock_side * 0.08))
+        hide.center = (clock_side // 2, clock_side // 2 + int(clock_side * 0.245))
+        face.fill((0, 0, 0, 0), hide)
     # Hand PNGs are tall+narrow strips — scale so height matches clockface.
     def _scale_hand(name: str) -> pygame.Surface | None:
         img = _safe_load(IMAGES_DIR / name)
