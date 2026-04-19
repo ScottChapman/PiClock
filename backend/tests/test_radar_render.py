@@ -1,12 +1,21 @@
 import io
-import math
 
 import httpx
+import pygame
 import pytest
-from PIL import Image
 
 from backend import radar_render as rr
 from backend.config import Marker, RadarMap
+
+
+def _make_png(size: tuple[int, int], colour: tuple[int, int, int, int]) -> bytes:
+    """Produce a tiny solid-colour PNG using pygame — avoids Pillow dep in tests."""
+    pygame.init()
+    surf = pygame.Surface(size, pygame.SRCALPHA)
+    surf.fill(colour)
+    buf = io.BytesIO()
+    pygame.image.save(surf, buf, "tile.png")
+    return buf.getvalue()
 
 
 def test_latlng_to_tile_matches_known_value():
@@ -24,27 +33,15 @@ def test_latlng_to_tile_at_zoom_2():
 
 
 def test_compute_box_gives_symmetric_crop_when_centered_on_tile_corner():
-    # Location right on a tile grid corner → crop should be centred.
     box = rr._compute_box((0.0, 0.0), 2, (256, 256))
-    # Whole world at z=2 is 4x4 tiles; (0,0) lat/lng sits at (2.0, 2.0) tile coords.
-    # With a 256 output, we need 1 tile horizontally/vertically.
     assert box.tiles_wide >= 1
     assert box.tiles_tall >= 1
 
 
 @pytest.mark.asyncio
-async def test_render_frame_composites_basemap_and_radar(monkeypatch):
-    """End-to-end: fake base + radar tiles, ensure the render returns a valid PNG."""
-    # 256x256 solid-colour tiles so we can verify the composite succeeds.
-    def make_png(colour: tuple[int, int, int, int]) -> bytes:
-        img = Image.new("RGBA", (256, 256), colour)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-
-    base_png = make_png((30, 30, 30, 255))     # dark grey basemap
-    radar_png = make_png((0, 200, 0, 180))     # green radar splotch
-
+async def test_render_frame_composites_basemap_and_radar():
+    base_png = _make_png((256, 256), (30, 30, 30, 255))
+    radar_png = _make_png((256, 256), (0, 200, 0, 180))
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -74,16 +71,13 @@ async def test_render_frame_composites_basemap_and_radar(monkeypatch):
             frame_time=1700000000,
         )
 
-    # Output is a real PNG
-    img = Image.open(io.BytesIO(png))
-    assert img.size == (256, 256)
-    # Basemap request happened (once) + radar requests fired
+    # Output round-trips through pygame as a real image of the right size
+    surf = pygame.image.load(io.BytesIO(png), "out.png")
+    assert surf.get_size() == (256, 256)
     assert any("basemaps.cartocdn.com" in u for u in calls)
     assert any("tilecache.rainviewer.com" in u for u in calls)
-    # Frame is cached
     assert renderer._frames[1700000000] == png
 
-    # Calling again reuses the cache (no additional HTTP calls for the frame)
     before = len(calls)
     again = await renderer.render_frame(
         client,
@@ -98,14 +92,7 @@ async def test_render_frame_composites_basemap_and_radar(monkeypatch):
 @pytest.mark.asyncio
 async def test_basemap_is_only_fetched_once():
     base_png_calls = 0
-
-    def make_png() -> bytes:
-        img = Image.new("RGBA", (256, 256), (10, 10, 10, 255))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-
-    png = make_png()
+    png = _make_png((256, 256), (10, 10, 10, 255))
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal base_png_calls
@@ -123,9 +110,7 @@ async def test_basemap_is_only_fetched_once():
                                         f"/v2/radar/{t}/0", t)
 
     first_basemap_calls = base_png_calls
-    # Render once more — should still be same count (basemap cached)
     async with httpx.AsyncClient(transport=transport) as client:
-        # New client but same renderer, basemap is still cached in the renderer.
         await renderer.render_frame(client, "https://tilecache.rainviewer.com",
                                     "/v2/radar/4000/0", 4000)
     assert base_png_calls == first_basemap_calls
