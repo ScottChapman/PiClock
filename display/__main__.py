@@ -114,6 +114,7 @@ async def run() -> int:
 
                 now = datetime.now(timezone.utc) if cfg_dict.get("clockUTC") else datetime.now()
                 weather_dict = _weather_as_dict(store.weather)
+                stale = store.weather_staleness()
 
                 ui.draw_background(screen, assets)
                 ui.draw_weather(screen, layout.weather, weather_dict, assets, fonts, cfg_dict)
@@ -126,8 +127,12 @@ async def run() -> int:
                         t, surf = None, None
                     ui.draw_radar(screen, panel_rect, surf, fonts, f"R{i+1}", t)
 
-                ui.draw_clock(screen, layout, assets, fonts, cfg_dict, now)
+                ui.draw_clock(screen, layout, assets, fonts, cfg_dict, now, stale)
                 ui.draw_forecast(screen, layout.forecast, weather_dict, assets, fonts, cfg_dict)
+                if stale is not None:
+                    # Drawn last so panel content can't paint over them.
+                    ui.draw_stale_dot(screen, layout.weather)
+                    ui.draw_stale_dot(screen, layout.forecast)
 
                 pygame.display.flip()
                 await asyncio.sleep(1 / FPS)
@@ -135,7 +140,6 @@ async def run() -> int:
             for t in bg_tasks:
                 t.cancel()
             await asyncio.gather(*bg_tasks, return_exceptions=True)
-            await store.close()
     finally:
         pygame.quit()
     return 0
