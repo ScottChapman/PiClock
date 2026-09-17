@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pygame
@@ -24,6 +24,13 @@ COL_TEXT_DIM = (150, 180, 200)
 COL_TEXT_MUTED = (110, 130, 150)
 COL_PANEL_BG = (0, 0, 0, 90)
 COL_PANEL_BORDER = (60, 80, 100)
+COL_WARN = (239, 159, 39)
+
+# Stale-data warning "breathes" rather than blinking — a hard blink is
+# unbearable on an always-on wall clock, and the floor keeps it legible
+# at the bottom of the cycle.
+BREATHE_PERIOD_MS = 2200
+BREATHE_FLOOR = 0.45
 
 CARDINALS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
              "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
@@ -31,6 +38,20 @@ CARDINALS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
 
 def wind_cardinal(deg: float) -> str:
     return CARDINALS[int((deg % 360) / 22.5 + 0.5) % 16]
+
+
+def breathe_alpha() -> int:
+    """Alpha for the stale-data warning, on a slow sine between floor and full."""
+    phase = (pygame.time.get_ticks() % BREATHE_PERIOD_MS) / BREATHE_PERIOD_MS
+    level = BREATHE_FLOOR + (1.0 - BREATHE_FLOOR) * (0.5 - 0.5 * math.cos(2 * math.pi * phase))
+    return int(level * 255)
+
+
+def format_age(age: timedelta) -> str:
+    minutes = int(age.total_seconds() // 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h"
 
 
 @dataclass
@@ -47,10 +68,11 @@ class Layout:
 def compute_layout(size: tuple[int, int]) -> Layout:
     w, h = size
     pad = max(6, w // 200)
-    # Columns 22% / 50% / 28% (matches the web layout the user approved)
+    # Columns 22% / 50% / 28% (matches the web layout the user approved).
+    # Four pads across: left margin, two inter-column gaps, right margin.
     left_w = int(w * 0.22)
     right_w = int(w * 0.28)
-    center_w = w - left_w - right_w - pad * 2
+    center_w = w - left_w - right_w - pad * 4
 
     left_x = pad
     center_x = left_x + left_w + pad
@@ -198,13 +220,14 @@ def draw_clock(
     fonts: Fonts,
     cfg: dict | None,
     now: datetime,
+    stale=None,
 ) -> None:
     digital = bool((cfg or {}).get("digital"))
     if digital:
         _draw_digital(screen, layout, fonts, cfg, now)
     else:
         _draw_analog(screen, layout, assets, now)
-    _draw_date(screen, layout, fonts, cfg, now)
+    _draw_date(screen, layout, fonts, cfg, now, stale)
 
 
 def _draw_analog(screen: pygame.Surface, layout: Layout, assets: Assets, now: datetime) -> None:
@@ -238,11 +261,67 @@ def _draw_digital(screen, layout: Layout, fonts: Fonts, cfg: dict | None, now: d
     screen.blit(surf, r.topleft)
 
 
-def _draw_date(screen, layout: Layout, fonts: Fonts, cfg: dict | None, now: datetime) -> None:
+def _warning_glyph(size: int) -> pygame.Surface:
+    """Outlined warning triangle, sized to sit beside the warning text."""
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    pygame.draw.polygon(
+        surf, COL_WARN,
+        [(size // 2, 0), (size - 1, size - 1), (0, size - 1)], 2,
+    )
+    bar_w = max(1, size // 7)
+    pygame.draw.rect(surf, COL_WARN, ((size - bar_w) // 2, size // 3, bar_w, size // 3))
+    return surf
+
+
+def _stale_text(stale) -> str:
+    if stale.last_update is None:
+        return "No weather data since startup"
+    when = stale.last_update.strftime("%-I:%M %p")
+    return f"Weather data {format_age(stale.age)} old · last update {when}"
+
+
+def _render_stale_warning(fonts: Fonts, stale) -> pygame.Surface:
+    """Glyph + message on one transparent surface, so a single alpha breathes both."""
+    text = fonts.small.render(_stale_text(stale), True, COL_WARN)
+    gsize = text.get_height()
+    glyph = _warning_glyph(gsize)
+    gap = max(4, gsize // 3)
+    surf = pygame.Surface((glyph.get_width() + gap + text.get_width(), gsize), pygame.SRCALPHA)
+    surf.blit(glyph, (0, 0))
+    surf.blit(text, (glyph.get_width() + gap, 0))
+    surf.set_alpha(breathe_alpha())
+    return surf
+
+
+def draw_stale_dot(screen: pygame.Surface, rect: pygame.Rect) -> None:
+    """Breathing dot in a panel's top-right corner, marking its data as stale.
+
+    Call this after the panel has drawn — panel content (the forecast
+    diorama in particular) would otherwise paint straight over it.
+    """
+    r = max(3, rect.width // 60)
+    dot = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+    pygame.draw.circle(dot, COL_WARN, (r, r), r)
+    dot.set_alpha(breathe_alpha())
+    screen.blit(dot, (rect.right - r * 2 - 8, rect.y + 8))
+
+
+def _draw_date(screen, layout: Layout, fonts: Fonts, cfg: dict | None, now: datetime,
+               stale=None) -> None:
     text = now.strftime("%A, %B %-d, %Y")
     surf = fonts.large.render(text, True, COL_TEXT)
-    r = surf.get_rect(center=layout.datestrip.center)
-    screen.blit(surf, r.topleft)
+    strip = layout.datestrip
+    if stale is None:
+        screen.blit(surf, surf.get_rect(center=strip.center).topleft)
+        return
+    # The date itself is never wrong, so it stays still — only the warning
+    # below it breathes.
+    warn = _render_stale_warning(fonts, stale)
+    gap = max(2, surf.get_height() // 8)
+    top = strip.centery - (surf.get_height() + gap + warn.get_height()) // 2
+    screen.blit(surf, surf.get_rect(centerx=strip.centerx, top=top).topleft)
+    screen.blit(warn, warn.get_rect(centerx=strip.centerx,
+                                    top=top + surf.get_height() + gap).topleft)
 
 
 def _blit_text(screen: pygame.Surface, text: str, font: pygame.font.Font,
