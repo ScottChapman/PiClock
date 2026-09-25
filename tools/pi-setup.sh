@@ -4,16 +4,17 @@
 # Run this ON THE PI (not the Mac):
 #   ~/PiClock/tools/pi-setup.sh
 #
-# Does two idempotent things, safe to re-run:
+# Does four idempotent things, safe to re-run:
 #   1. Disables Wi-Fi power save in the NetworkManager profile (persists
-#      across reboots). The Pi 3's brcmfmac chip has a known failure mode
-#      where the radio powers down between packets and doesn't wake back
-#      up cleanly — every socket call then fails instantly with
-#      "Temporary failure in name resolution" until the Pi is rebooted.
-#      That matches PiClock's DNS-wedge outages exactly.
-#   2. Installs tools/netwatch.sh as a once-a-minute cron job, so the next
-#      wedge (if any) leaves a record of whether the network was actually
-#      down or something else happened.
+#      across reboots).
+#   2. Installs tools/netwatch.sh as a once-a-minute cron job, so every
+#      outage leaves a record of the Pi's network state.
+#   3. Makes the systemd journal persistent (Raspberry Pi OS ships it
+#      volatile), so logs from before a reboot survive.
+#   4. Installs tools/wifiwatchdog.sh as a root cron job that reloads the
+#      Wi-Fi driver, then reboots, when the Wi-Fi stays down. PiClock's
+#      "DNS wedge" outages were the Pi 3's Wi-Fi getting stuck until reboot.
+#      Re-run this script after changing wifiwatchdog.sh to reinstall it.
 
 set -u
 
@@ -74,4 +75,34 @@ else
         || fail "failed to install crontab entry"
 fi
 
+# ---- 3. persistent journal ------------------------------------------------
+
+# Sorts after the vendor's 40-rpi-volatile-storage.conf, so it wins.
+JOURNAL_CONF=/etc/systemd/journald.conf.d/persistent.conf
+if [ -f "$JOURNAL_CONF" ]; then
+    log "persistent journal already configured"
+else
+    log "making the journal persistent (requires sudo)..."
+    sudo mkdir -p "$(dirname "$JOURNAL_CONF")" \
+        && printf '[Journal]\nStorage=persistent\n' | sudo tee "$JOURNAL_CONF" >/dev/null \
+        && sudo systemctl restart systemd-journald \
+        && sudo journalctl --flush \
+        || fail "failed to configure the persistent journal"
+fi
+
+# ---- 4. install the Wi-Fi watchdog ----------------------------------------
+
+# Root runs a root-owned copy, not the user-writable one in the checkout.
+WATCHDOG_SRC="$SCRIPT_DIR/wifiwatchdog.sh"
+WATCHDOG_BIN=/usr/local/sbin/piclock-wifiwatchdog
+WATCHDOG_CRON=/etc/cron.d/piclock-wifiwatchdog
+
+[ -f "$WATCHDOG_SRC" ] || fail "expected $WATCHDOG_SRC to exist"
+log "installing Wi-Fi watchdog to $WATCHDOG_BIN (requires sudo)..."
+sudo install -m 755 -o root -g root "$WATCHDOG_SRC" "$WATCHDOG_BIN" \
+    && echo "* * * * * root $WATCHDOG_BIN >/dev/null 2>&1" | sudo tee "$WATCHDOG_CRON" >/dev/null \
+    && sudo chmod 644 "$WATCHDOG_CRON" \
+    || fail "failed to install the Wi-Fi watchdog"
+
 log "done. Check progress later with: tail -f ~/netwatch.log"
+log "watchdog actions: journalctl -t wifiwatchdog"
