@@ -10,7 +10,7 @@
 #   2. Installs tools/netwatch.sh as a once-a-minute cron job, so every
 #      outage leaves a record of the Pi's network state.
 #   3. Makes the systemd journal persistent (Raspberry Pi OS ships it
-#      volatile), so logs from before a reboot survive.
+#      volatile), so logs from before a reboot survive, capped at 200 MB.
 #   4. Installs tools/wifiwatchdog.sh as a root cron job that, when the
 #      Wi-Fi stays down, re-activates the connection, then reloads the Wi-Fi
 #      driver, then reboots. PiClock's "DNS wedge" outages were the Pi 3's
@@ -79,13 +79,15 @@ fi
 # ---- 3. persistent journal ------------------------------------------------
 
 # Sorts after the vendor's 40-rpi-volatile-storage.conf, so it wins.
+# Uncapped, a persistent journal may grow to 4 GB on the SD card.
 JOURNAL_CONF=/etc/systemd/journald.conf.d/persistent.conf
-if [ -f "$JOURNAL_CONF" ]; then
+JOURNAL_WANT=$(printf '[Journal]\nStorage=persistent\nSystemMaxUse=200M')
+if [ "$(cat "$JOURNAL_CONF" 2>/dev/null)" = "$JOURNAL_WANT" ]; then
     log "persistent journal already configured"
 else
-    log "making the journal persistent (requires sudo)..."
+    log "making the journal persistent, capped at 200 MB (requires sudo)..."
     sudo mkdir -p "$(dirname "$JOURNAL_CONF")" \
-        && printf '[Journal]\nStorage=persistent\n' | sudo tee "$JOURNAL_CONF" >/dev/null \
+        && printf '%s\n' "$JOURNAL_WANT" | sudo tee "$JOURNAL_CONF" >/dev/null \
         && sudo systemctl restart systemd-journald \
         && sudo journalctl --flush \
         || fail "failed to configure the persistent journal"
