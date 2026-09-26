@@ -11,9 +11,10 @@
 #      outage leaves a record of the Pi's network state.
 #   3. Makes the systemd journal persistent (Raspberry Pi OS ships it
 #      volatile), so logs from before a reboot survive.
-#   4. Installs tools/wifiwatchdog.sh as a root cron job that reloads the
-#      Wi-Fi driver, then reboots, when the Wi-Fi stays down. PiClock's
-#      "DNS wedge" outages were the Pi 3's Wi-Fi getting stuck until reboot.
+#   4. Installs tools/wifiwatchdog.sh as a root cron job that, when the
+#      Wi-Fi stays down, re-activates the connection, then reloads the Wi-Fi
+#      driver, then reboots. PiClock's "DNS wedge" outages were the Pi 3's
+#      Wi-Fi getting stuck, or NetworkManager giving up, until reboot.
 #      Re-run this script after changing wifiwatchdog.sh to reinstall it.
 
 set -u
