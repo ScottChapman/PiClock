@@ -5,6 +5,7 @@ resolver wedges, every fetch then fails instantly with EAI_AGAIN, and
 nothing recovers until a restart. See display/data.py.
 """
 
+import asyncio
 import dataclasses
 from datetime import datetime, timedelta
 
@@ -108,3 +109,29 @@ async def test_failure_count_tracks_runs_of_failures(store, monkeypatch):
     monkeypatch.setattr(data_mod.weather_module, "fetch", ok)
     await store.refresh_weather()
     assert store._failures == 0
+
+
+async def test_weather_loop_retries_quickly_after_a_failed_start(store, monkeypatch):
+    # Boot races Wi-Fi: if the first fetch fails the loop must retry on the
+    # short delay, not wait out the full refresh interval.
+    delays = []
+    calls = []
+
+    async def fake_sleep(d):
+        delays.append(d)
+        if len(delays) >= 3:
+            raise asyncio.CancelledError
+
+    async def flaky_refresh():
+        calls.append(1)
+        return len(calls) >= 2  # fail once, then succeed
+
+    monkeypatch.setattr(data_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(store, "refresh_weather", flaky_refresh)
+    store.weather_updated = None  # startup fetch failed
+
+    with pytest.raises(asyncio.CancelledError):
+        await data_mod.weather_loop(store)
+
+    interval = max(60, store.settings.weather_refresh_minutes * 60)
+    assert delays == [data_mod.RETRY_SECONDS, data_mod.RETRY_SECONDS, interval]

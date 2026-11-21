@@ -33,6 +33,11 @@ RADAR_RENDER_SIZE = (512, 512)
 # Show the stale-data warning once the weather is this many refresh cycles old.
 STALE_AFTER_CYCLES = 2
 
+# After a failed refresh, retry on this short delay instead of waiting out the
+# full interval. Boot races Wi-Fi association, so the first fetch often fails
+# and the display would otherwise sit on "loading" for up to 30 minutes.
+RETRY_SECONDS = int(os.environ.get("PICLOCK_RETRY_SEC", "30"))
+
 
 @dataclass
 class Staleness:
@@ -94,30 +99,36 @@ class DataStore:
             return None
         return Staleness(age=age, last_update=self.weather_updated)
 
-    async def refresh_weather(self) -> None:
+    async def refresh_weather(self) -> bool:
+        """Fetch weather. Returns True on success, False if the fetch failed."""
         try:
             async with self._client() as client:
                 self.weather = await weather_module.fetch(self.settings, client)
             self.weather_updated = datetime.now()
             self._failures = 0
             self.generation += 1
+            return True
         except Exception:
             self._note_failure("weather refresh")
+            return False
 
-    async def refresh_radar(self) -> None:
-        """Fetch frame list and render every frame on every configured radar."""
+    async def refresh_radar(self) -> bool:
+        """Fetch frame list and render every frame on every configured radar.
+
+        Returns True unless the radar metadata fetch failed.
+        """
         if not self.renderers:
-            return
+            return True
         async with self._client() as client:
             try:
                 self.radar_meta = await radar_module.fetch(client)
                 self._failures = 0
             except Exception:
                 self._note_failure("radar metadata fetch")
-                return
+                return False
             frames: list[RadarFrame] = list(self.radar_meta.past[-RADAR_FRAME_LIMIT:])
             if not frames:
-                return
+                return True
 
             # Render each frame on each renderer concurrently — the basemap is
             # already cached after the first call, so subsequent frames only hit
@@ -136,17 +147,20 @@ class DataStore:
             new_frames.append(per_radar)
         self.radar_frames = new_frames
         self.generation += 1
+        return True
 
 
 async def weather_loop(store: DataStore) -> None:
     interval = max(60, store.settings.weather_refresh_minutes * 60)
+    ok = store.weather_updated is not None  # did the startup fetch succeed?
     while True:
-        await asyncio.sleep(interval)
-        await store.refresh_weather()
+        await asyncio.sleep(interval if ok else RETRY_SECONDS)
+        ok = await store.refresh_weather()
 
 
 async def radar_loop(store: DataStore) -> None:
     interval = max(60, store.settings.radar_refresh_minutes * 60)
+    ok = store.radar_meta is not None
     while True:
-        await asyncio.sleep(interval)
-        await store.refresh_radar()
+        await asyncio.sleep(interval if ok else RETRY_SECONDS)
+        ok = await store.refresh_radar()
